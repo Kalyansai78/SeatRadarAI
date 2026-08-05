@@ -1,0 +1,29 @@
+{
+    "city": "Hyderabad",
+
+    "movie": "Spider-Man: Brand New Day",
+
+    "date": "Saturday8",
+
+    "show": "07:30 PM RECLINERS 3D",
+
+    "seats": [
+        {
+            "row": "C",
+            "column": 7
+        },
+        {
+            "row": "C",
+            "column": 8
+        },
+        {
+            "row": "C",
+            "column": 9
+        }
+    ],
+
+    "monitor": {
+        "interval": 5000,
+        "maxAttempts": 5
+    }
+}
