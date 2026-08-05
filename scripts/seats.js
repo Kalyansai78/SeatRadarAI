@@ -134,6 +134,23 @@ async function startMonitoring(
 
         console.log("\nNo seats found in this attempt.");
 
+        // Wait before next attempt
+        if (attempt < maxAttempts) {
+
+            console.log(
+                `Waiting ${interval / 1000} seconds before next attempt...\n`
+            );
+
+            await page.waitForTimeout(interval);
+
+            console.log("Refreshing Seat Map...\n");
+
+            await page.reload({
+                waitUntil: "networkidle"
+            });
+
+        }
+
     }
 
     console.log("\nMonitoring Finished.");
