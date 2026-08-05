@@ -104,10 +104,49 @@ async function monitorSeats(page, seats) {
 
 }
 
+// Start Monitoring
+
+async function startMonitoring(
+    page,
+    seats,
+    interval,
+    maxAttempts
+) {
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+
+        console.log("\n==============================");
+        console.log(`Attempt ${attempt} of ${maxAttempts}`);
+        console.log("==============================");
+
+        const seatFound = await monitorSeats(
+            page,
+            seats
+        );
+
+        if (seatFound) {
+
+            console.log("\nMonitoring Completed Successfully.");
+
+            return true;
+
+        }
+
+        console.log("\nNo seats found in this attempt.");
+
+    }
+
+    console.log("\nMonitoring Finished.");
+
+    return false;
+
+}
+
 module.exports = {
     findSeat,
     isSeatAvailable,
     clickSeat,
     checkSeatOnce,
-    monitorSeats
+    monitorSeats,
+    startMonitoring
 };

@@ -9,16 +9,16 @@
 
     "seats": [
         {
+            "row": "J",
+            "column": 21
+        },
+        {
             "row": "C",
             "column": 7
         },
         {
             "row": "C",
             "column": 8
-        },
-        {
-            "row": "C",
-            "column": 9
         }
     ],
 

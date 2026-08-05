@@ -14,7 +14,7 @@ const {
 } = require("./district");
 
 const {
-    monitorSeats
+    startMonitoring
 } = require("./seats");
 
 const config = require("../config/config.json");
@@ -106,10 +106,12 @@ async function run() {
         console.log("==============================\n");
 
         // Monitor All Preferred Seats
-        await monitorSeats(
-            page,
-            config.seats
-        );
+        await startMonitoring(
+        page,
+        config.seats,
+        config.monitor.interval,
+        config.monitor.maxAttempts
+    );
 
         await page.pause();
 
