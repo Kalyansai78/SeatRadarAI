@@ -15,7 +15,7 @@ const {
 
 const {
     startMonitoring
-} = require("./seats");
+} = require("../engine/seatEngine");
 
 const config = require("../config/config.json");
 
