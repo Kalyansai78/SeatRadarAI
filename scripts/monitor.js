@@ -13,11 +13,17 @@ const {
     selectShow
 } = require("./district");
 
+const config = require("../config/config.json");
+
 const {
     startMonitoring
 } = require("../engine/monitorEngine");
 
-const config = require("../config/config.json");
+const {
+    proceedToPayment
+} = require("../engine/bookingEngine");
+
+const logger = require("../utils/logger");
 
 async function run() {
 
@@ -25,10 +31,10 @@ async function run() {
 
         const { browser, page } = await openDistrict();
 
-        console.log("District Opened");
+        logger.success("District Opened");
 
         // Select City
-        console.log("Selecting City...");
+        logger.info("Selecting City...");
         await openLocationPopup(page);
 
         await searchCity(page, config.city);
@@ -40,19 +46,19 @@ async function run() {
         await page.waitForTimeout(3000);
 
         // Open Search
-        console.log("Opening Search...");
+        logger.info("Opening Search...");
         await openSearch(page);
 
         await page.waitForTimeout(2000);
 
         // Search Movie
-        console.log("Searching Movie...");
+        logger.info("Searching Movie...");
         await searchMovie(page, config.movie);
 
         await page.waitForTimeout(2000);
 
         // Select Movie
-        console.log("Selecting Movie...");
+        logger.info("Selecting Movie...");
         await selectMovie(page, config.movie);
 
         await page.waitForLoadState("networkidle");
@@ -106,12 +112,18 @@ async function run() {
         console.log("==============================\n");
 
         // Monitor All Preferred Seats
-        await startMonitoring(
+        const seatFound = await startMonitoring(
         page,
         config.seats,
         config.monitor.interval,
         config.monitor.maxAttempts
     );
+
+        if (seatFound) {
+
+            await proceedToPayment(page);
+
+        }
 
         await page.pause();
 

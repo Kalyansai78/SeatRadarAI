@@ -1,3 +1,5 @@
+const logger = require("../utils/logger");
+
 // Find Seat using Row and Column
 
 async function findSeat(page, row, column) {
@@ -26,21 +28,13 @@ async function isSeatAvailable(page, row, column) {
 
 async function clickSeat(page, row, column) {
 
-    const available = await isSeatAvailable(page, row, column);
-
-    if (!available) {
-
-        console.log(`Seat ${row}${column} is not available.`);
-
-        return false;
-
-    }
+    logger.step(`Selecting Seat ${row}${column}...`);
 
     const seat = await findSeat(page, row, column);
 
     await seat.click();
 
-    console.log(`Seat ${row}${column} selected successfully.`);
+    logger.success(`Seat ${row}${column} selected successfully.`);
 
     return true;
 
@@ -50,21 +44,31 @@ async function clickSeat(page, row, column) {
 
 async function checkSeatOnce(page, row, column) {
 
-    console.log(`Checking Seat ${row}${column}...`);
+    logger.step(`Checking Seat ${row}${column}...`);
 
-    const clicked = await clickSeat(page, row, column);
+    const available = await isSeatAvailable(
+        page,
+        row,
+        column
+    );
 
-    if (clicked) {
+    if (!available) {
 
-        console.log(`Seat ${row}${column} is available.`);
+        logger.warning(`Seat ${row}${column} is unavailable.`);
 
-        return true;
+        return false;
 
     }
 
-    console.log(`Seat ${row}${column} is unavailable.`);
+    logger.success(`Seat ${row}${column} is available.`);
 
-    return false;
+    const clicked = await clickSeat(
+        page,
+        row,
+        column
+    );
+
+    return clicked;
 
 }
 

@@ -2,17 +2,13 @@ const {
     checkSeatOnce
 } = require("./seatEngine");
 
+const logger = require("../utils/logger");
+
 // Monitor Multiple Seats
 
 async function monitorSeats(page, seats) {
 
-    console.log("\nStarting Seat Monitoring...\n");
-
     for (const seat of seats) {
-
-        console.log(
-            `Checking ${seat.row}${seat.column}...`
-        );
 
         const available = await checkSeatOnce(
             page,
@@ -22,17 +18,13 @@ async function monitorSeats(page, seats) {
 
         if (available) {
 
-            console.log(
-                `\nSeat ${seat.row}${seat.column} booked successfully.`
-            );
-
             return true;
 
         }
 
     }
 
-    console.log("\nNo preferred seats are available.");
+    logger.warning("No preferred seats are available.");
 
     return false;
 
@@ -49,9 +41,7 @@ async function startMonitoring(
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 
-        console.log("\n==============================");
-        console.log(`Attempt ${attempt} of ${maxAttempts}`);
-        console.log("==============================");
+        logger.title(`Attempt ${attempt} / ${maxAttempts}`);
 
         const seatFound = await monitorSeats(
             page,
@@ -60,24 +50,21 @@ async function startMonitoring(
 
         if (seatFound) {
 
-            console.log("\nMonitoring Completed Successfully.");
-
             return true;
 
         }
 
-        console.log("\nNo seats found in this attempt.");
+        logger.warning("No seats found in this attempt.");
 
-        // Wait before next attempt
         if (attempt < maxAttempts) {
 
-            console.log(
-                `Waiting ${interval / 1000} seconds before next attempt...\n`
+            logger.wait(
+                `Waiting ${interval / 1000} seconds before next attempt...`
             );
 
             await page.waitForTimeout(interval);
 
-            console.log("Refreshing Seat Map...\n");
+            logger.info("Refreshing Seat Map...");
 
             await page.reload({
                 waitUntil: "networkidle"
@@ -87,7 +74,7 @@ async function startMonitoring(
 
     }
 
-    console.log("\nMonitoring Finished.");
+    logger.error("Monitoring finished. No preferred seats were found.");
 
     return false;
 
