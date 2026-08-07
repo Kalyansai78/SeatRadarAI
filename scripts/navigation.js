@@ -1,3 +1,5 @@
+const logger = require("../utils/logger");
+
 // Open Location Popup
 async function openLocationPopup(page) {
 
@@ -68,9 +70,37 @@ async function clickBookTickets(page) {
 }
 
 // Select Language
-async function selectLanguage(page) {
+async function selectLanguage(page, language) {
 
-    await page.locator('label[for="English_lsd"]').click();
+    const languageOption = page.locator(
+        `label[for="${language}_lsd"]`
+    );
+
+    // Check if the language selection page exists
+    if (await languageOption.count() === 0) {
+
+        logger.info("Language selection not required.");
+
+        return true;
+
+    }
+
+    // Check whether the requested language exists
+    if (!(await languageOption.isVisible())) {
+
+        logger.error(`Requested language "${language}" is not available.`);
+
+        return false;
+
+    }
+
+    logger.step(`Selecting ${language} language...`);
+
+    await languageOption.click();
+
+    logger.success(`${language} selected successfully.`);
+
+    return true;
 
 }
 

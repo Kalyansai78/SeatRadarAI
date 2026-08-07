@@ -1,16 +1,23 @@
-# Node modules
+# Dependencies
 node_modules/
+
+# Browser Session Storage
+storage/*.json
 
 # Logs
 logs/
 *.log
 
-# Environment variables
+# Environment Variables
 .env
 
-# VS Code
+# Playwright Reports
+playwright-report/
+test-results/
+
+# IDE
 .vscode/
 
-# OS files
+# OS Files
 .DS_Store
 Thumbs.db

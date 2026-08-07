@@ -20,7 +20,9 @@ const {
 } = require("../engine/monitorEngine");
 
 const {
-    proceedToPayment
+    proceedToPayment,
+    skipBeverages,
+    closeBestSeatsPopup
 } = require("../engine/bookingEngine");
 
 const logger = require("../utils/logger");
@@ -66,35 +68,50 @@ async function run() {
         await page.waitForTimeout(3000);
 
         // Book Tickets
-        console.log("Clicking Book Tickets...");
+        logger.info("Clicking Book Tickets...");
         await clickBookTickets(page);
 
         await page.waitForTimeout(1000);
 
         // Select Language
-        console.log("Selecting Language...");
-        await selectLanguage(page, "English");
+        logger.info("Selecting Language...");
+
+        const languageSelected = await selectLanguage(
+            page,
+            config.language
+        );
+
+        if (!languageSelected) {
+
+            await browser.close();
+
+            return;
+
+        }
 
         await page.waitForTimeout(1000);
 
         // Proceed
-        console.log("Clicking Proceed...");
+        logger.info("Clicking Proceed...");
         await clickProceed(page);
 
         await page.waitForTimeout(2000);
 
         // Select Date
-        console.log("Selecting Date...");
+        logger.info("Selecting Date...");
         await selectDate(page, config.date);
 
         await page.waitForTimeout(2000);
 
         // Select Show
-        console.log("Selecting Show...");
+        logger.info("Selecting Show...");
         await selectShow(page, config.show);
 
         // Wait for Seat Map
         await page.waitForTimeout(5000);
+
+        // Automatically close Best Seats popup if it appears
+        await closeBestSeatsPopup(page);
 
         // Display Seats
         console.log("\n==============================");
@@ -111,17 +128,21 @@ async function run() {
 
         console.log("==============================\n");
 
-        // Monitor All Preferred Seats
+        // Monitor Seats
         const seatFound = await startMonitoring(
-        page,
-        config.seats,
-        config.monitor.interval,
-        config.monitor.maxAttempts
-    );
+            page,
+            config.seats,
+            config.monitor.interval,
+            config.monitor.maxAttempts
+        );
 
         if (seatFound) {
 
             await proceedToPayment(page);
+
+            await page.waitForLoadState("networkidle");
+
+            await skipBeverages(page);
 
         }
 

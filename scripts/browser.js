@@ -4,11 +4,14 @@ async function openDistrict() {
 
     const browser = await chromium.launch({
         channel: "chrome",
-        headless: false
+        headless: false,
+        args: ["--start-maximized"]
     });
 
     const context = await browser.newContext({
-        permissions: []
+        viewport: null,
+        permissions: [],
+        storageState: "storage/district.json"
     });
 
     const page = await context.newPage();

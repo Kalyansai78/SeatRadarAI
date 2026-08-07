@@ -3,14 +3,16 @@
 
     "movie": "Spider-Man: Brand New Day",
 
+    "language": "Telugu",
+
     "date": "Saturday8",
 
-    "show": "07:30 PM RECLINERS 3D",
+    "show": "06:55 PM RECLINERS 3D",
 
     "seats": [
         {
-            "row": "C",
-            "column": 6
+            "row": "A",
+            "column": 7
         }
     ],
 
