@@ -9,11 +9,17 @@ const {
     clickBookTickets,
     selectLanguage,
     clickProceed,
-    selectDate,
-    selectShow
+    selectDate
 } = require("./district");
 
 const config = require("../config/config.json");
+
+const {
+    findTheatre,
+    getTheatreContainer,
+    getAvailableSessions,
+    findMatchingSession
+} = require("../engine/availabilityEngine");
 
 const {
     startMonitoring
@@ -35,100 +41,126 @@ async function run() {
 
         logger.success("District Opened");
 
-        // Select City
+        // ==========================
+        // CITY
+        // ==========================
         logger.info("Selecting City...");
         await openLocationPopup(page);
-
         await searchCity(page, config.city);
-
         await page.waitForTimeout(2000);
-
         await selectCity(page);
 
+        // ==========================
+        // SEARCH MOVIE
+        // ==========================
         await page.waitForTimeout(3000);
-
-        // Open Search
         logger.info("Opening Search...");
         await openSearch(page);
 
         await page.waitForTimeout(2000);
-
-        // Search Movie
         logger.info("Searching Movie...");
         await searchMovie(page, config.movie);
 
         await page.waitForTimeout(2000);
-
-        // Select Movie
         logger.info("Selecting Movie...");
         await selectMovie(page, config.movie);
 
         await page.waitForLoadState("networkidle");
 
+        // ==========================
+        // BOOK
+        // ==========================
         await page.waitForTimeout(3000);
-
-        // Book Tickets
         logger.info("Clicking Book Tickets...");
         await clickBookTickets(page);
 
+        // ==========================
+        // LANGUAGE
+        // ==========================
         await page.waitForTimeout(1000);
-
-        // Select Language
         logger.info("Selecting Language...");
-
-        const languageSelected = await selectLanguage(
-            page,
-            config.language
-        );
+        const languageSelected = await selectLanguage(page, config.language);
 
         if (!languageSelected) {
-
             await browser.close();
-
             return;
-
         }
 
+        // ==========================
+        // PROCEED
+        // ==========================
         await page.waitForTimeout(1000);
-
-        // Proceed
         logger.info("Clicking Proceed...");
         await clickProceed(page);
 
+        // ==========================
+        // DATE
+        // ==========================
         await page.waitForTimeout(2000);
-
-        // Select Date
         logger.info("Selecting Date...");
         await selectDate(page, config.date);
 
         await page.waitForTimeout(2000);
 
-        // Select Show
-        logger.info("Selecting Show...");
-        await selectShow(page, config.show);
+        // ==========================
+        // THEATRE
+        // ==========================
+        const theatre = await findTheatre(page, config.theatre);
 
-        // Wait for Seat Map
+        if (!theatre) {
+            await browser.close();
+            return;
+        }
+
+        const theatreContainer = await getTheatreContainer(theatre);
+
+        // ==========================
+        // SESSIONS
+        // ==========================
+        const sessions = await getAvailableSessions(theatreContainer);
+
+        console.log("\n==== AVAILABLE SHOWS ====");
+
+        sessions.forEach((s, i) => {
+            console.log(
+                `${i + 1}. ${s.time} | ${s.format || "N/A"} | ${s.experience || "N/A"}`
+            );
+        });
+
+        console.log("==========================\n");
+
+        // ==========================
+        // SELECT SESSION
+        // ==========================
+        const matchedSession = await findMatchingSession(sessions, config);
+
+        if (!matchedSession) {
+            await browser.close();
+            return;
+        }
+
+        logger.info("Selecting Matched Session...");
+        await matchedSession.locator.click();
+
+        // ==========================
+        // SEAT MAP
+        // ==========================
         await page.waitForTimeout(5000);
-
-        // Automatically close Best Seats popup if it appears
         await closeBestSeatsPopup(page);
 
-        // Display Seats
         console.log("\n==============================");
         console.log("Seats to Monitor");
         console.log("==============================");
 
-        for (const seat of config.seats) {
-
-            console.log(
-                `Row ${seat.row}, Column ${seat.column}`
-            );
-
-        }
+        config.seats.forEach(seat => {
+            console.log(`Row ${seat.row}, Column ${seat.column}`);
+        });
 
         console.log("==============================\n");
 
-        // Monitor Seats
+        // ==========================
+        // MONITOR SEATS
+        // ==========================
         const seatFound = await startMonitoring(
             page,
             config.seats,
@@ -137,26 +169,17 @@ async function run() {
         );
 
         if (seatFound) {
-
             await proceedToPayment(page);
-
             await page.waitForLoadState("networkidle");
-
             await skipBeverages(page);
-
         }
 
         await page.pause();
-
         await browser.close();
 
-    }
-    catch (err) {
-
+    } catch (err) {
         console.error(err);
-
     }
-
 }
 
 run();

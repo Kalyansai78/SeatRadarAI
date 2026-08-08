@@ -3,16 +3,20 @@
 
     "movie": "Spider-Man: Brand New Day",
 
+    "theatre": "PVR Nexus Mall (Formerly Forum Sujana) Kukatpally, Hyderabad",
+
     "language": "Telugu",
 
     "date": "Saturday8",
 
-    "show": "06:55 PM RECLINERS 3D",
+    "timePreference": "Night",
+
+    "show": "10:00 PM RECLINERS 3D",
 
     "seats": [
         {
             "row": "A",
-            "column": 7
+            "column": 1
         }
     ],
 
