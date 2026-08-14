@@ -1,27 +1,23 @@
 {
-    "city": "Hyderabad",
+  "city": "Hyderabad",
 
-    "movie": "Spider-Man: Brand New Day",
+  "movie": "Vishwanath and Sons",
 
-    "theatre": "PVR Nexus Mall (Formerly Forum Sujana) Kukatpally, Hyderabad",
+  "theatre": "PVR Atrium Mall",
 
-    "language": "Telugu",
+  "language": "Telugu",
 
-    "date": "Saturday8",
+  "date": "Saturday15",
 
-    "timePreference": "Night",
+  "time": "11:00 PM",
 
-    "show": "10:00 PM RECLINERS 3D",
-
-    "seats": [
-        {
-            "row": "A",
-            "column": 1
-        }
-    ],
-
-    "monitor": {
-        "interval": 5000,
-        "maxAttempts": 5
-    }
+  "seatPreference": {
+    "row": "F",
+    "count": 4
+  },
+  
+  "monitor": {
+    "interval": 5000,
+    "maxAttempts": 5
+  }
 }
