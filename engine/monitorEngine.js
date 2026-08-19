@@ -1,86 +1,408 @@
 const {
-    checkSeatOnce
+    checkPreferredSeats
 } = require("./seatEngine");
 
 const logger = require("../utils/logger");
 
-// Monitor Multiple Seats
+// ============================================================
+// MONITOR PREFERRED SEATS - ONE CHECK
+// ============================================================
+//
+// IMPORTANT:
+//
+// This function ONLY checks availability.
+//
+// It does NOT select seats.
+//
+// Returns:
+//
+// {
+//     available: true,
+//     seatClass: "CLASSIC",
+//     seats: [...]
+// }
+//
+// OR:
+//
+// {
+//     available: false,
+//     seatClass: null,
+//     seats: []
+// }
+// ============================================================
 
-async function monitorSeats(page, seats) {
+async function monitorSeats(
+    page,
+    row,
+    count
+) {
 
-    for (const seat of seats) {
+    logger.step(
+        `Checking ${count} seat(s) in preferred row ${row}...`
+    );
 
-        const available = await checkSeatOnce(
-            page,
-            seat.row,
-            seat.column
-        );
 
-        if (available) {
+    try {
 
-            return true;
+        const result =
+            await checkPreferredSeats(
+                page,
+                row,
+                count
+            );
 
+
+        if (!result) {
+
+            logger.warning(
+                `Requested ${count} seat(s) are not currently available in row ${row}.`
+            );
+
+            return {
+
+                available: false,
+
+                seatClass: null,
+
+                seats: []
+            };
         }
 
+
+        logger.success(
+            `Requested seats are available.`
+        );
+
+
+        return {
+
+            available: true,
+
+            seatClass:
+                result.seatClass,
+
+            seats:
+                result.seats
+        };
+
+
+    } catch (error) {
+
+        logger.warning(
+            `Seat availability check failed: ${error.message}`
+        );
+
+        return {
+
+            available: false,
+
+            seatClass: null,
+
+            seats: []
+        };
     }
-
-    logger.warning("No preferred seats are available.");
-
-    return false;
-
 }
 
-// Start Monitoring
+
+// ============================================================
+// WAIT
+// ============================================================
+
+async function waitBeforeSeatCheck(
+    page,
+    interval
+) {
+
+    logger.wait(
+        `Seats not available. Checking again in ${interval / 1000} seconds...`
+    );
+
+
+    await page.waitForTimeout(
+        interval
+    );
+}
+
+
+// ============================================================
+// REFRESH SEAT MAP
+// ============================================================
+//
+// We intentionally refresh the page.
+//
+// The purpose is to force District to retrieve the latest
+// seat availability.
+//
+// After refresh we wait for the page to settle.
+//
+// NOTE:
+// This function does NOT select anything.
+// ============================================================
+
+async function refreshSeatMap(
+    page
+) {
+
+    try {
+
+        logger.info(
+            "Refreshing Seat Map..."
+        );
+
+
+        await page.reload({
+            waitUntil: "domcontentloaded",
+            timeout: 30000
+        });
+
+
+        await page.waitForLoadState(
+            "load",
+            {
+                timeout: 30000
+            }
+        ).catch(() => {});
+
+
+        await page.waitForFunction(
+            () =>
+                document.readyState ===
+                "complete",
+            {
+                timeout: 30000
+            }
+        ).catch(() => {});
+
+
+        await page.waitForTimeout(
+            1500
+        );
+
+
+        logger.success(
+            "Seat Map refreshed successfully."
+        );
+
+
+        return true;
+
+
+    } catch (error) {
+
+        logger.warning(
+            `Seat Map refresh failed: ${error.message}`
+        );
+
+        return false;
+    }
+}
+
+
+// ============================================================
+// START SEAT MONITORING
+// ============================================================
+//
+// interval:
+//     milliseconds
+//
+// maxAttempts:
+//
+//     0 = unlimited
+//
+//     >0 = limited number of checks
+//
+// Example:
+//
+// startSeatMonitoring(
+//     page,
+//     "C",
+//     3,
+//     30000,
+//     0
+// );
+//
+// This means:
+//
+// Check row C
+// Find 3 continuous seats
+// Every 30 seconds
+// Forever
+// ============================================================
 
 async function startMonitoring(
     page,
-    seats,
-    interval,
-    maxAttempts
+    row,
+    count,
+    interval = 60000,
+    maxAttempts = 0
 ) {
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    logger.step(
+        `Monitoring ${count} seat(s) in row ${row}...`
+    );
 
-        logger.title(`Attempt ${attempt} / ${maxAttempts}`);
 
-        const seatFound = await monitorSeats(
-            page,
-            seats
-        );
+    let attempt = 0;
 
-        if (seatFound) {
 
-            return true;
+    while (true) {
 
-        }
+        attempt++;
 
-        logger.warning("No seats found in this attempt.");
 
-        if (attempt < maxAttempts) {
+        // ----------------------------------------------------
+        // ATTEMPT HEADER
+        // ----------------------------------------------------
 
-            logger.wait(
-                `Waiting ${interval / 1000} seconds before next attempt...`
+        if (maxAttempts > 0) {
+
+            logger.title(
+                `Seat Check ${attempt} / ${maxAttempts}`
             );
 
-            await page.waitForTimeout(interval);
+        } else {
 
-            logger.info("Refreshing Seat Map...");
-
-            await page.reload({
-                waitUntil: "networkidle"
-            });
-
+            logger.title(
+                `Seat Check ${attempt}`
+            );
         }
 
+
+        // ----------------------------------------------------
+        // CHECK SEATS
+        // ----------------------------------------------------
+
+        const result =
+            await monitorSeats(
+                page,
+                row,
+                count
+            );
+
+
+        // ----------------------------------------------------
+        // SEATS FOUND
+        // ----------------------------------------------------
+
+        if (result.available) {
+
+            logger.success(
+                `Requested seats are now available!`
+            );
+
+
+            logger.success(
+                `Available seats: ` +
+                result.seats
+                    .map(
+                        seat =>
+                            `${seat.row}${seat.seatNumber}`
+                    )
+                    .join(", ")
+            );
+
+
+            return result;
+        }
+
+
+        // ----------------------------------------------------
+        // MAX ATTEMPTS
+        // ----------------------------------------------------
+
+        if (
+            maxAttempts > 0 &&
+            attempt >= maxAttempts
+        ) {
+
+            logger.warning(
+                `Requested seats were not available after ${maxAttempts} checks.`
+            );
+
+
+            return {
+
+                available: false,
+
+                seatClass: null,
+
+                seats: []
+            };
+        }
+
+
+        // ----------------------------------------------------
+        // WAIT
+        // ----------------------------------------------------
+
+        await waitBeforeSeatCheck(
+            page,
+            interval
+        );
+
+
+        // ----------------------------------------------------
+        // REFRESH
+        // ----------------------------------------------------
+
+        const refreshed =
+            await refreshSeatMap(
+                page
+            );
+
+
+        if (!refreshed) {
+
+            logger.warning(
+                "Could not refresh Seat Map. Continuing monitoring..."
+            );
+        }
     }
-
-    logger.error("Monitoring finished. No preferred seats were found.");
-
-    return false;
-
 }
 
+
+// ============================================================
+// BACKWARD-COMPATIBLE ALIAS
+// ============================================================
+//
+// Some existing code may call:
+//
+// startMonitoring()
+//
+// Keep the original export name.
+//
+// ============================================================
+
+async function monitorPreferredSeats(
+    page,
+    row,
+    count,
+    interval = 60000,
+    maxAttempts = 0
+) {
+
+    return startMonitoring(
+        page,
+        row,
+        count,
+        interval,
+        maxAttempts
+    );
+}
+
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
 module.exports = {
+
     monitorSeats,
-    startMonitoring
+
+    startMonitoring,
+
+    monitorPreferredSeats,
+
+    refreshSeatMap
+
 };

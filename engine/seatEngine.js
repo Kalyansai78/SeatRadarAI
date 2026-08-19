@@ -1,56 +1,104 @@
 const logger = require("../utils/logger");
 
 // ============================================================
-// Normalize text
+// ESCAPE REGEX TEXT
 // ============================================================
-function normalizeText(text) {
-    return (text || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+
+function escapeRegExp(text) {
+
+    return String(text).replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&"
+    );
 }
 
 
 // ============================================================
-// Extract row + column from a seat label
-//
-// Supports examples such as:
-//
-// Row F, Column 1
-// Row F, Column 1, Available
-// Row F, Column 1, Booked
-// F, Column 1
+// GET EXACT SEAT LOCATOR
 // ============================================================
-function extractSeatPosition(text) {
+//
+// IMPORTANT:
+//
+// seatNumber = number visible to USER
+// column     = District's internal DOM column
+//
+// Example:
+//
+// Visible seat : C1
+// Internal     : column 9
+//
+// We use:
+//
+// seatNumber -> logic / terminal
+// column     -> Playwright locator
+// ============================================================
 
-    if (!text) {
-        return null;
-    }
+function getSeatLocator(page, seat) {
 
-    const clean = text.replace(/\s+/g, " ").trim();
+    const row =
+        escapeRegExp(seat.row);
 
-    // Row F, Column 1
-    let match = clean.match(
-        /row\s*([A-Z])\s*[,:\-]?\s*column\s*(\d+)/i
-    );
+    const seatClass =
+        escapeRegExp(seat.seatClass);
 
-    if (match) {
-        return {
-            row: match[1].toUpperCase(),
-            col: parseInt(match[2], 10)
-        };
-    }
+    const column =
+        seat.column;
 
-    // F, Column 1
-    match = clean.match(
-        /\b([A-Z])\s*[,:\-]?\s*column\s*(\d+)/i
-    );
+    return page.getByRole("button", {
+        name: new RegExp(
+            `available\\s+seat.*class\\s+${seatClass}.*row\\s+${row}\\s*,\\s*column\\s+${column}\\b`,
+            "i"
+        )
+    }).first();
+}
 
-    if (match) {
-        return {
-            row: match[1].toUpperCase(),
-            col: parseInt(match[2], 10)
-        };
+
+// ============================================================
+// GET VISIBLE SEAT NUMBER
+// ============================================================
+//
+// District displays the actual seat number inside the button.
+//
+// Example:
+//
+// <button>
+//     1
+// </button>
+//
+// The aria-label may say:
+//
+// available seat, class DIAMOND, row C, column 9, price 150
+//
+// Therefore:
+//
+// column 9 != seat number 1
+//
+// We read the visible button text.
+// ============================================================
+
+async function getVisibleSeatNumber(seat) {
+
+    try {
+
+        const text =
+            await seat.innerText();
+
+        const cleaned =
+            text.trim();
+
+        const match =
+            cleaned.match(/\d+/);
+
+        if (match) {
+
+            return Number(
+                match[0]
+            );
+        }
+
+    } catch {
+
+        // Ignore and return null.
     }
 
     return null;
@@ -58,233 +106,140 @@ function extractSeatPosition(text) {
 
 
 // ============================================================
-// Determine whether a seat appears available
+// DISCOVER ALL AVAILABLE SEATS
+// ============================================================
 //
-// We inspect several attributes because District can represent
-// seat state in different ways.
+// We do NOT assume:
+//
+// A-Z rows
+// AA / AB rows
+// Bronze / Silver / Gold
+// fixed column numbering
+//
+// Everything is discovered from actual seat map.
+//
+// We capture BOTH:
+//
+// seatNumber -> visible number
+// column     -> internal District column
 // ============================================================
-async function isSeatAvailable(seat) {
 
-    const ariaLabel = normalizeText(
-        await seat.getAttribute("aria-label")
+async function discoverAvailableSeats(page) {
+
+    logger.step(
+        "Discovering available seats..."
     );
 
-    const title = normalizeText(
-        await seat.getAttribute("title")
-    );
+    const seatButtons =
+        page.getByRole("button", {
+            name: /^available\s+seat/i
+        });
 
-    const dataState = normalizeText(
-        await seat.getAttribute("data-state")
-    );
-
-    const dataStatus = normalizeText(
-        await seat.getAttribute("data-status")
-    );
-
-    const className = normalizeText(
-        await seat.getAttribute("class")
-    );
-
-    const text = normalizeText(
-        await seat.innerText().catch(() => "")
-    );
-
-    const combined = [
-        ariaLabel,
-        title,
-        dataState,
-        dataStatus,
-        text
-    ]
-        .filter(Boolean)
-        .join(" ");
-
-    // --------------------------------------------------------
-    // Explicit unavailable states
-    // --------------------------------------------------------
-    const unavailableWords = [
-        "booked",
-        "occupied",
-        "unavailable",
-        "sold",
-        "blocked",
-        "reserved",
-        "not available"
-    ];
-
-    for (const word of unavailableWords) {
-
-        if (combined.includes(word)) {
-            return false;
-        }
-    }
-
-    // --------------------------------------------------------
-    // Explicit available states
-    // --------------------------------------------------------
-    const availableWords = [
-        "available",
-        "vacant",
-        "free",
-        "open"
-    ];
-
-    for (const word of availableWords) {
-
-        if (combined.includes(word)) {
-            return true;
-        }
-    }
-
-    // --------------------------------------------------------
-    // State attributes
-    // --------------------------------------------------------
-    if (
-        dataState === "available" ||
-        dataStatus === "available"
-    ) {
-        return true;
-    }
-
-    if (
-        dataState === "booked" ||
-        dataState === "occupied" ||
-        dataState === "unavailable" ||
-        dataStatus === "booked" ||
-        dataStatus === "occupied" ||
-        dataStatus === "unavailable"
-    ) {
-        return false;
-    }
-
-    // --------------------------------------------------------
-    // Disabled buttons are not selectable
-    // --------------------------------------------------------
-    const disabled =
-        await seat.isDisabled().catch(() => false);
-
-    if (disabled) {
-        return false;
-    }
-
-    const ariaDisabled =
-        normalizeText(
-            await seat.getAttribute("aria-disabled")
-        );
-
-    if (ariaDisabled === "true") {
-        return false;
-    }
-
-    // --------------------------------------------------------
-    // If no explicit state is found, don't assume available.
-    // This prevents selecting booked seats accidentally.
-    // --------------------------------------------------------
-    return false;
-}
-
-
-// ============================================================
-// Get all seat buttons
-// ============================================================
-function getSeatButtons(page) {
-
-    return page.getByRole("button");
-}
-
-
-// ============================================================
-// Get available seats in a specific row
-// ============================================================
-async function getAvailableSeatsInRow(page, row) {
-
-    const requestedRow = row.toUpperCase();
+    const count =
+        await seatButtons.count();
 
     logger.info(
-        `Inspecting seats in preferred row ${requestedRow}...`
+        `Seat buttons found: ${count}`
     );
-
-    const buttons = getSeatButtons(page);
-
-    const count = await buttons.count();
 
     const availableSeats = [];
 
-    let rowSeatCount = 0;
+    for (
+        let i = 0;
+        i < count;
+        i++
+    ) {
 
-    for (let i = 0; i < count; i++) {
-
-        const seat = buttons.nth(i);
-
-        if (
-            !(await seat.isVisible().catch(() => false))
-        ) {
-            continue;
-        }
+        const seat =
+            seatButtons.nth(i);
 
         const ariaLabel =
-            await seat.getAttribute("aria-label");
+            await seat
+                .getAttribute("aria-label")
+                .catch(() => null);
 
-        const title =
-            await seat.getAttribute("title");
-
-        const dataState =
-            await seat.getAttribute("data-state");
-
-        const dataStatus =
-            await seat.getAttribute("data-status");
-
-        const text =
-            await seat.innerText().catch(() => "");
-
-        const combined = [
-            ariaLabel,
-            title,
-            dataState,
-            dataStatus,
-            text
-        ]
-            .filter(Boolean)
-            .join(" ");
-
-        const position = extractSeatPosition(combined);
-
-        if (!position) {
+        if (!ariaLabel) {
             continue;
         }
 
-        if (position.row !== requestedRow) {
+
+        // --------------------------------------------------------
+        // Expected:
+        //
+        // available seat,
+        // class DIAMOND,
+        // row C,
+        // column 9,
+        // price 150
+        //
+        // Price is intentionally ignored.
+        // --------------------------------------------------------
+
+        const match =
+            ariaLabel.match(
+                /available\s+seat.*?class\s+([^,]+).*?row\s+([^,]+).*?column\s+(\d+)/i
+            );
+
+        if (!match) {
             continue;
         }
 
-        rowSeatCount++;
 
-        const available =
-            await isSeatAvailable(seat);
+        const seatClass =
+            match[1].trim();
 
-        logger.info(
-            `Seat ${position.row}${position.col} | ` +
-            `available=${available} | ` +
-            `aria="${ariaLabel || ""}"`
-        );
+        const row =
+            match[2].trim();
 
-        if (available) {
+        const column =
+            Number(match[3]);
 
-            availableSeats.push({
-                col: position.col,
-                locator: seat
-            });
+
+        // --------------------------------------------------------
+        // Read USER-VISIBLE seat number.
+        // --------------------------------------------------------
+
+        const seatNumber =
+            await getVisibleSeatNumber(
+                seat
+            );
+
+
+        if (
+            seatNumber === null ||
+            Number.isNaN(seatNumber)
+        ) {
+
+            // Some special/disabled seats can have no
+            // visible number. Ignore them rather than
+            // breaking the whole discovery process.
+
+            logger.info(
+                `Skipping seat with unreadable visible number: ` +
+                `${seatClass} ${row} column ${column}.`
+            );
+
+            continue;
         }
+
+
+        availableSeats.push({
+
+            seatClass,
+
+            row,
+
+            // USER-FACING NUMBER
+            seatNumber,
+
+            // DISTRICT INTERNAL COLUMN
+            column
+        });
     }
 
-    availableSeats.sort(
-        (a, b) => a.col - b.col
-    );
 
     logger.info(
-        `Row ${requestedRow}: ` +
-        `${rowSeatCount} seat(s) detected, ` +
-        `${availableSeats.length} available`
+        `Available seats discovered: ${availableSeats.length}`
     );
 
     return availableSeats;
@@ -292,295 +247,595 @@ async function getAvailableSeatsInRow(page, row) {
 
 
 // ============================================================
-// Get all rows
+// GROUP SEATS BY CLASS + ROW
 // ============================================================
-function getAllRows() {
+//
+// Important:
+//
+// GOLD A
+// SILVER A
+// BRONZE A
+//
+// are different seating groups.
+//
+// We must NEVER mix them.
+// ============================================================
 
-    return "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+function groupSeatsByClassAndRow(seats) {
+
+    const groups =
+        new Map();
+
+    for (const seat of seats) {
+
+        const key =
+            `${seat.seatClass}|||${seat.row}`;
+
+        if (!groups.has(key)) {
+
+            groups.set(
+                key,
+                []
+            );
+        }
+
+        groups
+            .get(key)
+            .push(seat);
+    }
+
+
+    // Sort by USER-VISIBLE seat number.
+
+    for (
+        const seatsInGroup
+        of groups.values()
+    ) {
+
+        seatsInGroup.sort(
+            (a, b) =>
+                a.seatNumber -
+                b.seatNumber
+        );
+    }
+
+
+    return groups;
 }
 
 
 // ============================================================
-// Find continuous seats
+// GET AVAILABLE SEATS IN PREFERRED ROW
 // ============================================================
-function findContinuousSeats(
-    seats,
-    countNeeded
+
+async function getAvailableSeatsInRow(
+    page,
+    row
 ) {
 
+    logger.info(
+        `Inspecting available seats in row ${row}...`
+    );
+
+    const allSeats =
+        await discoverAvailableSeats(
+            page
+        );
+
+    const normalizedRow =
+        String(row)
+            .trim()
+            .toUpperCase();
+
+    const rowSeats =
+        allSeats.filter(
+            seat =>
+                seat.row
+                    .trim()
+                    .toUpperCase() ===
+                normalizedRow
+        );
+
+    logger.info(
+        `Row ${row}: ${rowSeats.length} available seat(s)`
+    );
+
+    return rowSeats;
+}
+
+
+// ============================================================
+// FIND CONTINUOUS SEATS
+// ============================================================
+//
+// IMPORTANT:
+//
+// DO NOT use District's column here.
+//
+// Example:
+//
+// Visible:
+//
+// 1  2  3  4  5  6
+//
+// Internal:
+//
+// 9  10 11 12 13 14
+//
+// We want:
+//
+// 1 -> 2 -> 3 -> 4 -> 5 -> 6
+//
+// Therefore continuity is based on seatNumber.
+// ============================================================
+
+function findContinuousSeats(
+    seats,
+    count
+) {
+
+    if (!Array.isArray(seats)) {
+        return null;
+    }
+
     if (
-        !Array.isArray(seats) ||
-        seats.length < countNeeded
+        !Number.isInteger(count) ||
+        count <= 0
     ) {
         return null;
     }
 
+    if (seats.length < count) {
+        return null;
+    }
+
+
+    const sortedSeats =
+        [...seats].sort(
+            (a, b) =>
+                a.seatNumber -
+                b.seatNumber
+        );
+
+
     for (
         let i = 0;
-        i <= seats.length - countNeeded;
+        i <= sortedSeats.length - count;
         i++
     ) {
 
-        let continuous = true;
+        const group =
+            sortedSeats.slice(
+                i,
+                i + count
+            );
+
+        let continuous =
+            true;
+
 
         for (
-            let j = 0;
-            j < countNeeded - 1;
+            let j = 1;
+            j < group.length;
             j++
         ) {
 
             if (
-                seats[i + j].col + 1 !==
-                seats[i + j + 1].col
+                group[j].seatNumber !==
+                group[j - 1].seatNumber + 1
             ) {
 
-                continuous = false;
+                continuous =
+                    false;
+
                 break;
             }
         }
 
+
         if (continuous) {
 
-            return seats.slice(
-                i,
-                i + countNeeded
-            );
+            return group;
         }
     }
+
 
     return null;
 }
 
 
 // ============================================================
-// Get seat locator
+// FIND BEST GROUP IN A ROW
 // ============================================================
-function getSeatLocator(
-    page,
-    row,
-    column
+//
+// A row can exist in multiple classes.
+//
+// Example:
+//
+// BRONZE A -> 1,2,3,4
+// SILVER A -> 1,2,3,4
+// GOLD A   -> 1,2,3,4
+//
+// Each class is checked separately.
+// ============================================================
+
+function findSeatsInRow(
+    rowSeats,
+    count
 ) {
 
-    return page.getByRole("button", {
-        name: new RegExp(
-            `row\\s*${row}\\s*[,\\-:]?\\s*column\\s*${column}\\b`,
-            "i"
-        )
-    });
-}
+    const groups =
+        new Map();
 
 
-// ============================================================
-// Select seats
-// ============================================================
-async function selectSeats(
-    page,
-    seatList
-) {
+    for (const seat of rowSeats) {
 
-    for (const seatInfo of seatList) {
+        const key =
+            seat.seatClass;
 
-        const {
-            row,
-            col,
-            locator
-        } = seatInfo;
+        if (!groups.has(key)) {
 
-        let seat = locator;
-
-        // If locator wasn't supplied, locate it again.
-        if (!seat) {
-
-            seat = getSeatLocator(
-                page,
-                row,
-                col
-            ).first();
+            groups.set(
+                key,
+                []
+            );
         }
 
-        await seat.scrollIntoViewIfNeeded();
-
-        await seat.click();
-
-        logger.success(
-            `Seat ${row}${col} selected`
-        );
+        groups
+            .get(key)
+            .push(seat);
     }
+
+
+    for (
+        const [seatClass, seats]
+        of groups
+    ) {
+
+        const selected =
+            findContinuousSeats(
+                seats,
+                count
+            );
+
+
+        if (selected) {
+
+            return {
+
+                seatClass,
+
+                seats:
+                    selected
+            };
+        }
+    }
+
+
+    return null;
 }
 
 
 // ============================================================
-// Preferred row selection
+// CHECK PREFERRED SEATS - READ ONLY
 // ============================================================
-async function selectPreferredRow(
+//
+// IMPORTANT:
+//
+// This function DOES NOT click anything.
+//
+// It only discovers currently available seats.
+//
+// Used by monitorEngine.
+//
+// Returns:
+//
+// {
+//     seatClass: "CLASSIC",
+//     seats: [...]
+// }
+//
+// or:
+//
+// null
+// ============================================================
+
+async function checkPreferredSeats(
     page,
     row,
     count
 ) {
 
-    const available =
+    logger.step(
+        `Checking ${count} preferred seat(s) in row ${row}...`
+    );
+
+
+    const rowSeats =
         await getAvailableSeatsInRow(
             page,
             row
         );
 
-    if (available.length === 0) {
 
-        logger.warning(
-            `No available seats detected in row ${row}.`
+    if (
+        !rowSeats ||
+        rowSeats.length === 0
+    ) {
+
+        logger.info(
+            `No available seats found in row ${row}.`
         );
 
-        return false;
+        return null;
     }
 
-    const best =
-        findContinuousSeats(
-            available,
+
+    const result =
+        findSeatsInRow(
+            rowSeats,
             count
         );
 
-    if (!best) {
 
-        logger.warning(
-            `Row ${row} has ${available.length} ` +
-            `available seat(s), but not ${count} ` +
-            `continuous seats.`
+    if (!result) {
+
+        logger.info(
+            `No ${count} continuous seat(s) available in row ${row}.`
+        );
+
+        return null;
+    }
+
+
+    logger.success(
+        `Found ${count} continuous seat(s) in ` +
+        `${result.seatClass} row ${row}: ` +
+        result.seats
+            .map(
+                seat =>
+                    seat.seatNumber
+            )
+            .join(", ")
+    );
+
+
+    return result;
+}
+
+
+// ============================================================
+// SELECT SEATS
+// ============================================================
+//
+// Uses:
+//
+// seatNumber -> terminal output
+// column     -> actual Playwright locator
+// ============================================================
+
+async function selectSeats(
+    page,
+    seats
+) {
+
+    if (
+        !Array.isArray(seats) ||
+        seats.length === 0
+    ) {
+
+        logger.error(
+            "No seats supplied for selection."
         );
 
         return false;
     }
 
-    const columns =
-        best.map(seat => seat.col);
 
-    logger.success(
-        `Adjacent seats found in row ${row}: ` +
-        columns.join(", ")
-    );
+    for (const seatInfo of seats) {
 
-    await selectSeats(
-        page,
-        best.map(seat => ({
-            row,
-            col: seat.col,
-            locator: seat.locator
-        }))
-    );
+        const seat =
+            getSeatLocator(
+                page,
+                seatInfo
+            );
+
+
+        await seat.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
+
+
+        await seat.scrollIntoViewIfNeeded();
+
+
+        await seat.click();
+
+
+        logger.success(
+            `Seat ${seatInfo.seatClass} ` +
+            `${seatInfo.row}${seatInfo.seatNumber} selected`
+        );
+    }
+
 
     return true;
 }
 
 
 // ============================================================
-// Any-row adjacent selection
+// SELECT PREFERRED ROW
 // ============================================================
+
+async function selectPreferredRow(
+    page,
+    row,
+    count
+) {
+
+    logger.step(
+        `Trying preferred row ${row} for ${count} seats...`
+    );
+
+
+    const result =
+        await checkPreferredSeats(
+            page,
+            row,
+            count
+        );
+
+
+    if (!result) {
+
+        logger.warning(
+            `Could not find ${count} suitable seats in row ${row}.`
+        );
+
+        return false;
+    }
+
+
+    logger.success(
+        `Seats found in ${result.seatClass} row ${row}: ` +
+        result.seats
+            .map(
+                seat =>
+                    seat.seatNumber
+            )
+            .join(", ")
+    );
+
+
+    await selectSeats(
+        page,
+        result.seats
+    );
+
+
+    return true;
+}
+
+
+// ============================================================
+// DISCOVER ACTUAL ROWS
+// ============================================================
+
+function discoverRows(
+    seats
+) {
+
+    const rows = [];
+
+    for (const seat of seats) {
+
+        if (!rows.includes(seat.row)) {
+
+            rows.push(
+                seat.row
+            );
+        }
+    }
+
+    return rows;
+}
+
+
+// ============================================================
+// SELECT FROM OTHER ACTUAL ROWS
+// ============================================================
+
 async function selectAnyRow(
     page,
     count
 ) {
 
     logger.step(
-        "Trying adjacent seats in other rows..."
+        "Trying other available rows..."
     );
 
-    const rows = getAllRows();
+
+    const allSeats =
+        await discoverAvailableSeats(
+            page
+        );
+
+
+    if (
+        !allSeats ||
+        allSeats.length === 0
+    ) {
+
+        logger.warning(
+            "No available seats discovered."
+        );
+
+        return false;
+    }
+
+
+    const rows =
+        discoverRows(
+            allSeats
+        );
+
+
+    logger.info(
+        `Rows discovered: ${rows.join(", ")}`
+    );
+
 
     for (const row of rows) {
 
-        const available =
-            await getAvailableSeatsInRow(
-                page,
-                row
+        const rowSeats =
+            allSeats.filter(
+                seat =>
+                    seat.row === row
             );
 
-        const best =
-            findContinuousSeats(
-                available,
+
+        const result =
+            findSeatsInRow(
+                rowSeats,
                 count
             );
 
-        if (!best) {
+
+        if (!result) {
             continue;
         }
 
-        const columns =
-            best.map(seat => seat.col);
 
         logger.success(
-            `Adjacent seats found in row ${row}: ` +
-            columns.join(", ")
+            `Seats found in ${result.seatClass} row ${row}: ` +
+            result.seats
+                .map(
+                    seat =>
+                        seat.seatNumber
+                )
+                .join(", ")
         );
+
 
         await selectSeats(
             page,
-            best.map(seat => ({
-                row,
-                col: seat.col,
-                locator: seat.locator
-            }))
+            result.seats
         );
+
 
         return true;
     }
 
-    return false;
-}
-
-
-// ============================================================
-// Multi-row fallback
-// ============================================================
-async function selectMultiRowSeats(
-    page,
-    countNeeded
-) {
-
-    logger.step(
-        "Trying multi-row seat selection..."
-    );
-
-    const rows = getAllRows();
-
-    const selected = [];
-
-    for (const row of rows) {
-
-        const available =
-            await getAvailableSeatsInRow(
-                page,
-                row
-            );
-
-        for (const seat of available) {
-
-            selected.push({
-                row,
-                col: seat.col,
-                locator: seat.locator
-            });
-
-            if (
-                selected.length ===
-                countNeeded
-            ) {
-
-                await selectSeats(
-                    page,
-                    selected
-                );
-
-                return true;
-            }
-        }
-    }
 
     return false;
 }
 
 
 // ============================================================
-// MAIN SMART SEAT SELECTION
+// MAIN SMART SELECTION
 // ============================================================
+
 async function autoSelectBestSeats(
     page,
     config
@@ -591,14 +846,21 @@ async function autoSelectBestSeats(
         count
     } = config.seatPreference;
 
+
     logger.step(
-        `Trying preferred row ${row || "Auto"} ` +
-        `for ${count} seats...`
+        `Finding ${count} seat(s)` +
+        (
+            row
+                ? ` in preferred row ${row}...`
+                : "..."
+        )
     );
+
 
     // ========================================================
     // 1. PREFERRED ROW
     // ========================================================
+
     if (row) {
 
         const preferredSuccess =
@@ -607,6 +869,7 @@ async function autoSelectBestSeats(
                 row,
                 count
             );
+
 
         if (preferredSuccess) {
 
@@ -618,40 +881,34 @@ async function autoSelectBestSeats(
         }
     }
 
+
     // ========================================================
-    // 2. OTHER ROWS
+    // 2. DYNAMIC FALLBACK
     // ========================================================
-    const anyRowSuccess =
+
+    const fallbackSuccess =
         await selectAnyRow(
             page,
             count
         );
 
-    if (anyRowSuccess) {
 
-        return true;
-    }
-
-    // ========================================================
-    // 3. MULTI-ROW FALLBACK
-    // ========================================================
-    const multiRowSuccess =
-        await selectMultiRowSeats(
-            page,
-            count
-        );
-
-    if (multiRowSuccess) {
+    if (fallbackSuccess) {
 
         logger.success(
-            "Seats selected across multiple rows."
+            "Seats selected successfully."
         );
 
         return true;
     }
 
+
+    // ========================================================
+    // 3. FAILED
+    // ========================================================
+
     logger.error(
-        "❌ Unable to find enough available seats."
+        `Unable to find ${count} suitable seats.`
     );
 
     return false;
@@ -661,13 +918,26 @@ async function autoSelectBestSeats(
 // ============================================================
 // EXPORTS
 // ============================================================
+
 module.exports = {
 
     getSeatLocator,
 
+    discoverAvailableSeats,
+
     getAvailableSeatsInRow,
 
     findContinuousSeats,
+
+    findSeatsInRow,
+
+    checkPreferredSeats,
+
+    selectSeats,
+
+    selectPreferredRow,
+
+    selectAnyRow,
 
     autoSelectBestSeats
 

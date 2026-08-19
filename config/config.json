@@ -1,19 +1,19 @@
 {
   "city": "Hyderabad",
 
-  "movie": "Vishwanath and Sons",
+  "movie": "DC",
 
-  "theatre": "PVR Atrium Mall",
+  "theatre": "PVR Lakeshore Mall",
 
   "language": "Telugu",
 
-  "date": "Saturday15",
+  "date": "Wednesday19",
 
-  "time": "11:00 PM",
+  "time": "7:50 PM",
 
   "seatPreference": {
-    "row": "F",
-    "count": 4
+    "row": "K",
+    "count": 3
   },
   
   "monitor": {

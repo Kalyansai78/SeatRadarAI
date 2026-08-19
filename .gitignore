@@ -4,6 +4,9 @@ node_modules/
 # Browser Session Storage
 storage/*.json
 
+# Screenshots
+screenshots/
+
 # Logs
 logs/
 *.log

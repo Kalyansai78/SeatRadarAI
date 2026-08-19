@@ -12,7 +12,18 @@ const {
     selectDate
 } = require("./district");
 
-const config = require("../config/config.json");
+
+// ============================================================
+// CONFIG
+// ============================================================
+
+const config =
+    require("../config/config.json");
+
+
+// ============================================================
+// AVAILABILITY ENGINE
+// ============================================================
 
 const {
     findTheatre,
@@ -21,44 +32,117 @@ const {
     findMatchingSession
 } = require("../engine/availabilityEngine");
 
+
+// ============================================================
+// BOOKING ENGINE
+// ============================================================
+
 const {
     proceedToPayment,
     skipBeverages,
+    handleAgeConfirmation,
     closeBestSeatsPopup
 } = require("../engine/bookingEngine");
 
-const logger = require("../utils/logger");
+
+// ============================================================
+// RELEASE ENGINE
+// ============================================================
+
+const {
+    monitorBookingRelease,
+    monitorTheatreRelease,
+    monitorShowRelease
+} = require("../engine/releaseEngine");
 
 
-// ======================================================
+// ============================================================
+// MONITOR ENGINE
+// ============================================================
+
+const {
+    startMonitoring: startSeatMonitoring
+} = require("../engine/monitorEngine");
+
+
+// ============================================================
+// SEAT ENGINE
+// ============================================================
+
+const {
+    checkPreferredSeats,
+    selectSeats
+} = require("../engine/seatEngine");
+
+const {
+    notifyAndConfirm
+} = require("./notifier");
+
+const {
+    prepareBookingReview
+} = require("../engine/reviewEngine");
+
+// ============================================================
+// LOGGER
+// ============================================================
+
+const logger =
+    require("../utils/logger");
+
+
+// ============================================================
+// READLINE
+// ============================================================
+
+const readline =
+    require("readline");
+
+
+// ============================================================
 // VALIDATE CONFIG
-// ======================================================
+// ============================================================
 
 function validateConfig(config) {
 
     if (!config.movie) {
-        throw new Error("❌ Movie is missing in config.json");
+        throw new Error(
+            "❌ Movie is missing in config.json"
+        );
     }
 
     if (!config.city) {
-        throw new Error("❌ City is missing in config.json");
+        throw new Error(
+            "❌ City is missing in config.json"
+        );
     }
 
     if (!config.theatre) {
-        throw new Error("❌ Theatre is missing in config.json");
+        throw new Error(
+            "❌ Theatre is missing in config.json"
+        );
     }
 
     if (!config.date) {
-        throw new Error("❌ Date is missing in config.json");
+        throw new Error(
+            "❌ Date is missing in config.json"
+        );
     }
 
     if (!config.time) {
-        throw new Error("❌ Exact show time is missing in config.json");
+        throw new Error(
+            "❌ Exact show time is missing in config.json"
+        );
     }
 
     if (!config.seatPreference) {
         throw new Error(
             "❌ seatPreference is missing in config.json"
+        );
+    }
+
+    if (!config.seatPreference.row) {
+        throw new Error(
+            "❌ Seat row is missing in config.json"
         );
     }
 
@@ -68,44 +152,254 @@ function validateConfig(config) {
         );
     }
 
+    if (!config.monitor) {
+        throw new Error(
+            "❌ monitor configuration is missing in config.json"
+        );
+    }
+
+    if (
+        typeof config.monitor.interval !== "number" ||
+        config.monitor.interval <= 0
+    ) {
+        throw new Error(
+            "❌ monitor.interval must be greater than 0."
+        );
+    }
+
+    if (
+        typeof config.monitor.maxAttempts !== "number" ||
+        config.monitor.maxAttempts < 0
+    ) {
+        throw new Error(
+            "❌ monitor.maxAttempts must be 0 or greater. Use 0 for unlimited monitoring."
+        );
+    }
+
     return true;
 }
 
 
-// ======================================================
+// ============================================================
 // PRINT CONFIG
-// ======================================================
+// ============================================================
 
 function printConfig(config) {
 
-    console.log("\n🎬 SeatRadar AI - Smart Booking\n");
+    console.log(
+        "\n🎬 SeatRadar AI - Smart Booking\n"
+    );
 
-    console.log("======================================");
-    console.log("        BOOKING CONFIGURATION");
-    console.log("======================================");
+    console.log(
+        "======================================"
+    );
 
-    console.log(`🎬 Movie      : ${config.movie}`);
-    console.log(`📍 City       : ${config.city}`);
-    console.log(`🏢 Theatre    : ${config.theatre}`);
-    console.log(`📅 Date       : ${config.date}`);
-    console.log(`🕒 Show Time  : ${config.time}`);
+    console.log(
+        "        BOOKING CONFIGURATION"
+    );
+
+    console.log(
+        "======================================"
+    );
+
+    console.log(
+        `🎬 Movie      : ${config.movie}`
+    );
+
+    console.log(
+        `📍 City       : ${config.city}`
+    );
+
+    console.log(
+        `🏢 Theatre    : ${config.theatre}`
+    );
+
+    console.log(
+        `📅 Date       : ${config.date}`
+    );
+
+    console.log(
+        `🕒 Show Time  : ${config.time}`
+    );
+
     console.log(
         `🎟️ Seats      : ${config.seatPreference.count}`
     );
+
     console.log(
-        `🔤 Row        : ${config.seatPreference.row || "Auto"}`
+        `🔤 Row        : ${config.seatPreference.row}`
     );
+
     console.log(
         `🌐 Language   : ${config.language || "Auto"}`
     );
 
-    console.log("======================================\n");
+    console.log(
+        "======================================"
+    );
+
+    console.log(
+        `⏱️ Monitor    : every ${
+            config.monitor.interval / 1000
+        } seconds`
+    );
+
+    console.log(
+        `🔁 Attempts   : ${
+            config.monitor.maxAttempts === 0
+                ? "Unlimited"
+                : config.monitor.maxAttempts
+        }`
+    );
+
+    console.log(
+        "======================================\n"
+    );
+}
+
+// ============================================================
+// NORMALIZE SEAT RESULT
+// ============================================================
+//
+// checkPreferredSeats() returns:
+//
+// {
+//     seatClass,
+//     seats
+// }
+//
+// monitorEngine returns:
+//
+// {
+//     available,
+//     seatClass,
+//     seats
+// }
+//
+// We normalize both into:
+//
+// {
+//     available,
+//     seatClass,
+//     seats
+// }
+//
+// ============================================================
+
+function normalizeSeatResult(result) {
+
+    if (
+        !result ||
+        !Array.isArray(result.seats) ||
+        result.seats.length === 0
+    ) {
+
+        return {
+            available: false,
+            seatClass: null,
+            seats: []
+        };
+    }
+
+    return {
+        available: true,
+        seatClass: result.seatClass || null,
+        seats: result.seats
+    };
 }
 
 
-// ======================================================
+// ============================================================
+// SELECT EXACT MONITORED SEATS
+// ============================================================
+
+async function selectMonitoredSeats(
+    page,
+    seatResult
+) {
+
+    if (
+        !seatResult ||
+        !seatResult.available ||
+        !Array.isArray(seatResult.seats) ||
+        seatResult.seats.length === 0
+    ) {
+
+        logger.error(
+            "No monitored seats available for selection."
+        );
+
+        return false;
+    }
+
+    logger.step(
+        "Selecting exact monitored seats..."
+    );
+
+    logger.info(
+        `Seats to select: ${
+            seatResult.seats
+                .map(
+                    seat =>
+                        `${seat.row}${seat.seatNumber}`
+                )
+                .join(", ")
+        }`
+    );
+
+    try {
+
+        /*
+         * IMPORTANT:
+         *
+         * Pass the original seat objects to seatEngine.
+         *
+         * The seat objects contain:
+         *
+         * row
+         * seatNumber
+         * column
+         * seatClass
+         *
+         * seatEngine knows how to use the District
+         * internal column correctly.
+         */
+
+        const selected =
+            await selectSeats(
+                page,
+                seatResult.seats
+            );
+
+        if (!selected) {
+
+            logger.error(
+                "Seat engine could not select the monitored seats."
+            );
+
+            return false;
+        }
+
+        logger.success(
+            "All monitored seats selected successfully."
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Monitored seat selection failed: ${error.message}`
+        );
+
+        return false;
+    }
+}
+
+
+// ============================================================
 // MAIN
-// ======================================================
+// ============================================================
 
 async function run() {
 
@@ -113,73 +407,84 @@ async function run() {
 
     try {
 
-        // ==================================================
+        // ====================================================
         // VALIDATE CONFIG
-        // ==================================================
+        // ====================================================
 
         validateConfig(config);
 
         printConfig(config);
 
 
-        // ==================================================
-        // BROWSER
-        // ==================================================
+        // ====================================================
+        // OPEN DISTRICT
+        // ====================================================
 
-        logger.info("Opening District...");
+        logger.info(
+            "Opening District..."
+        );
 
-        const result = await openDistrict();
+        const result =
+            await openDistrict();
 
-        browser = result.browser;
+        browser =
+            result.browser;
 
-        const page = result.page;
+        const page =
+            result.page;
 
-        logger.success("District Opened");
+        logger.success(
+            "District Opened"
+        );
 
 
-        // ==================================================
-        // CITY
-        // ==================================================
+        // ====================================================
+        // SELECT CITY
+        // ====================================================
 
-        logger.info("Selecting City...");
+        logger.info(
+            "Selecting City..."
+        );
 
-        await openLocationPopup(page);
+        await openLocationPopup(
+            page
+        );
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(
+            1000
+        );
 
         await searchCity(
             page,
             config.city
         );
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(
+            1000
+        );
 
         await selectCity(
             page,
             config.city
         );
 
-        /*
-         * Do NOT use networkidle.
-         *
-         * District can keep background requests running.
-         */
-
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(
+            3000
+        );
 
 
-        // ==================================================
-        // SEARCH MOVIE
-        // ==================================================
+        // ====================================================
+        // OPEN SEARCH
+        // ====================================================
 
-        logger.info("Opening Search...");
+        logger.info(
+            "Opening Search..."
+        );
 
-        const searchOpened = await openSearch(page);
-
-        /*
-         * openSearch may return false if the movie is already
-         * visible on the page.
-         */
+        const searchOpened =
+            await openSearch(
+                page
+            );
 
         if (!searchOpened) {
 
@@ -189,11 +494,13 @@ async function run() {
         }
 
 
-        // ==================================================
+        // ====================================================
         // SEARCH MOVIE
-        // ==================================================
+        // ====================================================
 
-        logger.info("Searching Movie...");
+        logger.info(
+            "Searching Movie..."
+        );
 
         const movieSearchSuccess =
             await searchMovie(
@@ -211,11 +518,13 @@ async function run() {
         }
 
 
-        // ==================================================
+        // ====================================================
         // SELECT MOVIE
-        // ==================================================
+        // ====================================================
 
-        logger.info("Selecting Movie...");
+        logger.info(
+            "Selecting Movie..."
+        );
 
         const movieSelected =
             await selectMovie(
@@ -233,24 +542,34 @@ async function run() {
         }
 
 
-        // ==================================================
+        // ====================================================
         // BOOK TICKETS
-        // ==================================================
+        // ====================================================
 
-        logger.info("Clicking Book Tickets...");
+        logger.info(
+            "Clicking Book Tickets..."
+        );
 
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(
+            2000
+        );
 
-        await clickBookTickets(page);
+        await clickBookTickets(
+            page
+        );
 
 
-        // ==================================================
+        // ====================================================
         // LANGUAGE
-        // ==================================================
+        // ====================================================
 
-        logger.info("Selecting Language...");
+        logger.info(
+            "Selecting Language..."
+        );
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(
+            1000
+        );
 
         const languageSelected =
             await selectLanguage(
@@ -268,26 +587,64 @@ async function run() {
         }
 
 
-        // ==================================================
+        // ====================================================
         // PROCEED
-        // ==================================================
+        // ====================================================
 
-        logger.info("Clicking Proceed...");
+        logger.info(
+            "Clicking Proceed..."
+        );
 
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(
+            1000
+        );
 
-        await clickProceed(page);
+        await clickProceed(
+            page
+        );
 
 
-        // ==================================================
-        // DATE
-        // ==================================================
+        // ====================================================
+        // DATE RELEASE MONITORING
+        // ====================================================
+
+        logger.info(
+            `Checking requested date: ${config.date}`
+        );
+
+        const dateReleased =
+            await monitorBookingRelease(
+                page,
+                config.date,
+                config.monitor.interval,
+                config.monitor.maxAttempts
+            );
+
+        if (!dateReleased) {
+
+            logger.error(
+                `❌ Requested date "${config.date}" is not available.`
+            );
+
+            logger.warning(
+                "Booking flow stopped because requested date was not released."
+            );
+
+            return;
+        }
+
+
+        // ====================================================
+        // SELECT DATE
+        // ====================================================
 
         logger.info(
             `Selecting Date: ${config.date}`
         );
 
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(
+            1000
+        );
 
         const dateSelected =
             await selectDate(
@@ -304,17 +661,44 @@ async function run() {
             return;
         }
 
-
-        // ==================================================
-        // WAIT FOR SHOW LIST
-        // ==================================================
-
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(
+            2000
+        );
 
 
-        // ==================================================
-        // THEATRE
-        // ==================================================
+        // ====================================================
+        // THEATRE RELEASE MONITORING
+        // ====================================================
+
+        logger.info(
+            `Checking requested theatre: ${config.theatre}`
+        );
+
+        const theatreReleased =
+            await monitorTheatreRelease(
+                page,
+                config.theatre,
+                config.monitor.interval,
+                config.monitor.maxAttempts
+            );
+
+        if (!theatreReleased) {
+
+            logger.error(
+                `❌ Theatre "${config.theatre}" is not available.`
+            );
+
+            logger.warning(
+                "Booking flow stopped because requested theatre was not available."
+            );
+
+            return;
+        }
+
+
+        // ====================================================
+        // FIND THEATRE
+        // ====================================================
 
         logger.info(
             `Searching Theatre: ${config.theatre}`
@@ -335,10 +719,14 @@ async function run() {
             return;
         }
 
+        logger.success(
+            `Theatre "${config.theatre}" found.`
+        );
 
-        // ==================================================
-        // THEATRE CONTAINER
-        // ==================================================
+
+        // ====================================================
+        // GET THEATRE CONTAINER
+        // ====================================================
 
         const theatreContainer =
             await getTheatreContainer(
@@ -346,53 +734,109 @@ async function run() {
             );
 
 
-        // ==================================================
-        // AVAILABLE SESSIONS
-        // ==================================================
+        // ====================================================
+        // SHOW RELEASE MONITORING
+        // ====================================================
+
+        logger.info(
+            `Checking requested show: ${config.time}`
+        );
+
+        const showReleased =
+            await monitorShowRelease(
+                page,
+                config.theatre,
+                config.time,
+                config.monitor.interval,
+                config.monitor.maxAttempts
+            );
+
+        if (!showReleased) {
+
+            logger.error(
+                `❌ Show "${config.time}" is not available.`
+            );
+
+            logger.warning(
+                "Booking flow stopped because requested show was not available."
+            );
+
+            return;
+        }
+
+
+        // ====================================================
+        // READ AVAILABLE SESSIONS
+        // ====================================================
+
+        logger.step(
+            "Reading available sessions..."
+        );
 
         const sessions =
             await getAvailableSessions(
                 theatreContainer
             );
 
+        if (
+            !sessions ||
+            sessions.length === 0
+        ) {
 
-        console.log("\n======================================");
-        console.log("        AVAILABLE SHOWS");
-        console.log("======================================");
+            logger.error(
+                "❌ No sessions found."
+            );
 
-        sessions.forEach((session, index) => {
+            return;
+        }
 
-            let output =
-                `${index + 1}. ${session.time}`;
 
-            if (session.format) {
+        // ====================================================
+        // PRINT AVAILABLE SHOWS
+        // ====================================================
 
-                output +=
-                    ` | ${session.format}`;
+        console.log(
+            "\n======================================"
+        );
+
+        console.log(
+            "        AVAILABLE SHOWS"
+        );
+
+        console.log(
+            "======================================"
+        );
+
+        sessions.forEach(
+            (session, index) => {
+
+                let output =
+                    `${index + 1}. ${session.time}`;
+
+                if (session.format) {
+
+                    output +=
+                        ` | ${session.format}`;
+                }
+
+                console.log(
+                    output
+                );
             }
+        );
 
-            console.log(output);
-        });
+        console.log(
+            "======================================\n"
+        );
 
-        console.log("======================================\n");
 
-
-        // ==================================================
-        // SELECT EXACT SHOW
-        // ==================================================
+        // ====================================================
+        // FIND EXACT SHOW
+        // ====================================================
 
         logger.info(
             `Looking for exact show time: ${config.time}`
         );
-
-        /*
-         * IMPORTANT:
-         *
-         * findMatchingSession will now be responsible
-         * for matching config.time.
-         *
-         * We are intentionally NOT using timePreference.
-         */
 
         const matchedSession =
             await findMatchingSession(
@@ -414,9 +858,9 @@ async function run() {
         }
 
 
-        // ==================================================
+        // ====================================================
         // SELECT SHOW
-        // ==================================================
+        // ====================================================
 
         logger.info(
             `Selecting show: ${matchedSession.time}`
@@ -431,117 +875,347 @@ async function run() {
         );
 
 
-        // ==================================================
-        // SEAT MAP
-        // ==================================================
+        // ====================================================
+        // 18+ CONFIRMATION
+        // ====================================================
+
+        await handleAgeConfirmation(
+            page
+        );
+
+
+        // ====================================================
+        // WAIT FOR SEAT MAP
+        // ====================================================
 
         logger.info(
             "Waiting for seat map..."
         );
 
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(
+            5000
+        );
 
-        await closeBestSeatsPopup(page);
+        await closeBestSeatsPopup(
+            page
+        );
 
 
-        // ==================================================
+        // ====================================================
         // SEAT PREFERENCE
-        // ==================================================
-
-        console.log("\n======================================");
-        console.log("          SEAT PREFERENCE");
-        console.log("======================================");
+        // ====================================================
 
         console.log(
-            `Row   : ${
-                config.seatPreference.row || "Auto"
-            }`
+            "\n======================================"
         );
 
         console.log(
-            `Count : ${
-                config.seatPreference.count
-            }`
+            "          SEAT PREFERENCE"
         );
 
-        console.log("======================================\n");
-
-
-        // ==================================================
-        // SEAT SELECTION
-        // ==================================================
-
-        const {
-            autoSelectBestSeats
-        } = require("../engine/seatEngine");
-
-        logger.info(
-            "Finding suitable seats..."
+        console.log(
+            "======================================"
         );
 
-        const success =
-            await autoSelectBestSeats(
+        console.log(
+            `Row   : ${config.seatPreference.row}`
+        );
+
+        console.log(
+            `Count : ${config.seatPreference.count}`
+        );
+
+        console.log(
+            "======================================\n"
+        );
+
+
+        // ====================================================
+        // FIRST CHECK REQUESTED SEATS
+        // ====================================================
+
+        logger.step(
+            `Checking requested seats in row ${config.seatPreference.row}...`
+        );
+
+
+        /*
+         * IMPORTANT FIX
+         *
+         * checkPreferredSeats() returns:
+         *
+         * {
+         *     seatClass,
+         *     seats
+         * }
+         *
+         * It does NOT return:
+         *
+         * {
+         *     available: true,
+         *     seatClass,
+         *     seats
+         * }
+         *
+         * Therefore normalize it before using it.
+         */
+
+        const initialSeatCheck =
+            await checkPreferredSeats(
                 page,
-                config
+                config.seatPreference.row,
+                config.seatPreference.count
             );
 
 
-        // ==================================================
-        // PAYMENT
-        // ==================================================
+        let seatResult =
+            normalizeSeatResult(
+                initialSeatCheck
+            );
 
-        if (!success) {
+
+        // ====================================================
+        // SEATS NOT AVAILABLE
+        // ====================================================
+
+        if (!seatResult.available) {
+
+            logger.warning(
+                `Requested ${config.seatPreference.count} seat(s) are not currently available in row ${config.seatPreference.row}.`
+            );
+
+            logger.info(
+                "Starting requested-seat monitoring..."
+            );
+
+
+            // ------------------------------------------------
+            // MONITOR REQUESTED SEATS
+            // ------------------------------------------------
+
+            seatResult =
+                await startSeatMonitoring(
+                    page,
+                    config.seatPreference.row,
+                    config.seatPreference.count,
+                    config.monitor.interval,
+                    config.monitor.maxAttempts
+                );
+
+
+            // ------------------------------------------------
+            // MONITORING FAILED
+            // ------------------------------------------------
+
+            if (
+                !seatResult ||
+                !seatResult.available
+            ) {
+
+                logger.error(
+                    "❌ Requested seats did not become available."
+                );
+
+                logger.warning(
+                    "Booking flow stopped."
+                );
+
+                return;
+            }
+            const confirmed =
+                await notifyAndConfirm({
+                    type: "SEATS_AVAILABLE",
+
+                    movie: config.movie,
+
+                    theatre: config.theatre,
+
+                    date: config.date,
+
+                    time: config.time,
+
+                    seats: seatResult.seats.map(
+                        seat =>
+                            `${seat.row}${seat.seatNumber}`
+                )
+            });
+            
+            // ------------------------------------------------
+            // USER DECLINED
+            // ------------------------------------------------
+
+            if (!confirmed) {
+
+                logger.warning(
+                    "User declined the booking."
+                );
+
+                logger.info(
+                    "No seats were selected."
+                );
+
+                logger.info(
+                    "Booking flow stopped."
+                );
+
+                return;
+            }
+
+
+            // ------------------------------------------------
+            // USER CONFIRMED
+            // ------------------------------------------------
+
+            logger.success(
+                "User confirmed booking."
+            );
+        }
+
+
+        // ====================================================
+        // VERIFY SEAT RESULT
+        // ====================================================
+
+        if (
+            !seatResult ||
+            !seatResult.available ||
+            !Array.isArray(seatResult.seats) ||
+            seatResult.seats.length === 0
+        ) {
 
             logger.error(
-                "❌ Seat selection failed."
+                "❌ No requested seats available for selection."
             );
 
             return;
         }
 
 
+        // ====================================================
+        // PRINT SEAT AVAILABILITY
+        // ====================================================
+
         logger.success(
-            "Seats selected successfully."
+            `Requested seats available: ${
+                seatResult.seats
+                    .map(
+                        seat =>
+                            `${seat.row}${seat.seatNumber}`
+                    )
+                    .join(", ")
+            }`
         );
 
 
-        // ==================================================
-        // PROCEED TO PAYMENT
-        // ==================================================
+        // ====================================================
+        // SELECT ONLY REQUESTED SEATS
+        // ====================================================
 
-        await proceedToPayment(page);
+        const seatsSelected =
+            await selectMonitoredSeats(
+                page,
+                seatResult
+            );
+
+        if (!seatsSelected) {
+
+            logger.error(
+                "❌ Requested seat selection failed."
+            );
+
+            return;
+        }
+
+        logger.success(
+            "Requested seats selected successfully."
+        );
+
+
+        // ====================================================
+        // PROCEED TO PAYMENT
+        // ====================================================
+
+        await proceedToPayment(
+            page
+        );
 
         await page.waitForLoadState(
             "domcontentloaded"
+        ).catch(() => {});
+
+
+        // ====================================================
+        // FOOD & BEVERAGES
+        // ====================================================
+
+        await skipBeverages(
+            page
         );
 
-        await skipBeverages(page);
 
+        // ============================================================
+        // PREPARE BOOKING REVIEW
+        // ============================================================
 
-        // ==================================================
-        // PAUSE FOR TESTING
-        // ==================================================
+        logger.step(
+            "Preparing final booking review..."
+        );
+
+        const review =
+            await prepareBookingReview(
+                page,
+                config
+            );
+
+        if (!review.success) {
+
+            logger.error(
+                "❌ Could not prepare booking review."
+            );
+
+            logger.warning(
+                "Booking flow stopped before payment."
+            );
+
+            return;
+        }
 
         logger.success(
-            "Booking flow reached payment stage."
+            "Booking review prepared successfully."
         );
+
+        logger.info(
+            "Payment has NOT been initiated."
+        );
+
+        logger.info(
+            "Waiting for user confirmation before payment."
+        );
+
+        // ====================================================
+        // DEVELOPMENT PAUSE
+        // ====================================================
 
         await page.pause();
 
+
     } catch (error) {
 
-        console.error("\n❌ SeatRadar AI Error:\n");
+        console.error(
+            "\n❌ SeatRadar AI Error:\n"
+        );
 
-        console.error(error);
+        console.error(
+            error
+        );
 
     } finally {
 
         /*
-         * During development we don't automatically close
-         * the browser after every failure.
+         * Keep browser open during development.
          *
-         * This allows us to inspect the page when something
-         * goes wrong.
+         * Once the complete flow is stable,
+         * enable browser.close().
          */
 
         if (browser) {
@@ -550,15 +1224,14 @@ async function run() {
                 "Browser session finished."
             );
 
-            // Uncomment this later when the flow is stable.
             // await browser.close();
         }
     }
 }
 
 
-// ======================================================
+// ============================================================
 // START
-// ======================================================
+// ============================================================
 
 run();

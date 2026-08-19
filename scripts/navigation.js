@@ -1,17 +1,8 @@
 const logger = require("../utils/logger");
 
-// ======================================================
-// HELPER
-// ======================================================
-
-function escapeRegExp(text) {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-
-// ======================================================
+// ============================================================
 // SAFE CLICK
-// ======================================================
+// ============================================================
 
 async function safeClick(locator, name) {
 
@@ -24,7 +15,7 @@ async function safeClick(locator, name) {
     } catch (error) {
 
         logger.warning(
-            `${name} normal click failed. Retrying...`
+            `${name} click failed. Retrying...`
         );
 
         await locator.click({
@@ -34,59 +25,88 @@ async function safeClick(locator, name) {
     }
 }
 
+// ============================================================
+// LOCATION DIALOG
+// ============================================================
 
-// ======================================================
-// OPEN LOCATION POPUP
-// ======================================================
+function getLocationDialog(page) {
+
+    return page
+        .getByRole("dialog")
+        .filter({
+            has: page.getByPlaceholder(
+                "Search city, area or locality"
+            )
+        })
+        .first();
+}
+
+
+function getLocationInput(page) {
+
+    return getLocationDialog(page)
+        .getByRole("textbox")
+        .first();
+}
+
+// ============================================================
+// OPEN LOCATION
+// ============================================================
 
 async function openLocationPopup(page) {
 
     logger.step("Opening location selector...");
 
-    // Find the actual location button in the header
-    const locationButton = page.locator(
-        'button[data-district-ui="true"][aria-label]'
-    ).first();
+    try {
 
-    await locationButton.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
+        const locationButton = page.locator(
+            'button[data-district-ui="true"][aria-label]'
+        ).first();
 
-    const currentCity =
-        await locationButton.getAttribute("aria-label");
+        await locationButton.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    logger.info(
-        `Current District location: ${currentCity}`
-    );
+        const currentCity =
+            await locationButton.getAttribute("aria-label");
 
-    // Click the location button
-    await safeClick(
-        locationButton,
-        "Location button"
-    );
+        logger.info(
+            `Current District location: ${currentCity}`
+        );
 
-    // Wait for the REAL location search input
-    const locationInput = page.getByPlaceholder(
-        "Search city, area or locality"
-    ).first();
+        await safeClick(
+            locationButton,
+            "Location button"
+        );
 
-    await locationInput.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
+        const locationInput =
+            getLocationInput(page);
 
-    logger.success(
-        "Location popup opened."
-    );
+        await locationInput.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    return true;
+        logger.success(
+            "Location popup opened."
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Could not open location popup: ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
+// ============================================================
 // SEARCH CITY
-// ======================================================
+// ============================================================
 
 async function searchCity(page, city) {
 
@@ -94,33 +114,55 @@ async function searchCity(page, city) {
         `Searching city: ${city}`
     );
 
-    const locationInput = page.getByPlaceholder(
-        "Search city, area or locality"
-    ).first();
+    try {
 
-    await locationInput.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
+        const locationInput =
+            getLocationInput(page);
 
-    await locationInput.fill("");
+        await locationInput.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    await locationInput.fill(city);
+        await locationInput.fill("");
 
-    // Allow search results to render
-    await page.waitForTimeout(1000);
+        await locationInput.fill(city);
 
-    logger.success(
-        `City search entered: ${city}`
-    );
+        await page.waitForTimeout(800);
 
-    return true;
+        const value =
+            await locationInput.inputValue();
+
+        if (
+            value.trim().toLowerCase() !==
+            city.trim().toLowerCase()
+        ) {
+
+            throw new Error(
+                `City search value mismatch. ` +
+                `Expected "${city}", got "${value}".`
+            );
+        }
+
+        logger.success(
+            `City search entered: ${city}`
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Could not search city "${city}": ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
+// ============================================================
 // SELECT CITY
-// ======================================================
+// ============================================================
 
 async function selectCity(page, city) {
 
@@ -128,102 +170,108 @@ async function selectCity(page, city) {
         `Selecting city: ${city}`
     );
 
-    /*
-     * IMPORTANT:
-     *
-     * Before searching for the city button,
-     * verify that the location popup is ACTUALLY visible.
-     */
-
-    const locationInput = page.getByPlaceholder(
-        "Search city, area or locality"
-    ).first();
-
-    if (
-        !(await locationInput.isVisible().catch(() => false))
-    ) {
-
-        throw new Error(
-            "Location popup is not visible while selecting city."
-        );
-    }
-
-    logger.info(
-        "Location popup confirmed."
-    );
-
-    /*
-     * Exact city button.
-     *
-     * Example:
-     *
-     * Hyderabad
-     * Hyderabad, Telangana
-     *
-     * aria-label = Hyderabad
-     */
-    const cityButton = page.getByRole("button", {
-        name: city,
-        exact: true
-    }).first();
-
-    await cityButton.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
-
-    logger.info(
-        `City button "${city}" is visible.`
-    );
-
-    await cityButton.scrollIntoViewIfNeeded();
-
-    await page.waitForTimeout(500);
-
-    logger.info(
-        `Clicking city "${city}"...`
-    );
-
-    await safeClick(
-        cityButton,
-        `City "${city}"`
-    );
-
-    /*
-     * Wait for popup to disappear.
-     */
     try {
 
+        const locationInput =
+            getLocationInput(page);
+
         await locationInput.waitFor({
-            state: "hidden",
+            state: "visible",
             timeout: 10000
         });
 
-    } catch (error) {
+        const cityButton =
+            page.getByRole("button", {
+                name: city,
+                exact: true
+            }).first();
 
-        logger.warning(
-            "Location popup did not close immediately."
+        await cityButton.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
+
+        logger.info(
+            `City button "${city}" is visible.`
         );
 
-        await page.waitForTimeout(2000);
+        await safeClick(
+            cityButton,
+            `City "${city}"`
+        );
+
+        try {
+
+            await locationInput.waitFor({
+                state: "hidden",
+                timeout: 5000
+            });
+
+        } catch {
+
+            logger.warning(
+                "Location popup did not close immediately."
+            );
+        }
+
+        logger.success(
+            `City "${city}" selected.`
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Could not select city "${city}": ${error.message}`
+        );
+
+        return false;
     }
-
-    logger.success(
-        `City "${city}" selected.`
-    );
-
-    /*
-     * Give District time to update the homepage.
-     */
-    await page.waitForTimeout(2500);
-
-    return true;
 }
 
 
-// ======================================================
+// ============================================================
+// SEARCH DIALOG
+// ============================================================
+//
+// IMPORTANT:
+//
+// Do NOT use:
+//
+// page.getByRole("dialog").first()
+//
+// District can have more than one dialog.
+//
+// The movie search dialog contains the "Movies" button
+// and the search textbox.
+//
+// ============================================================
+
+function getSearchDialog(page) {
+
+    return page
+        .getByRole("dialog")
+        .filter({
+            has: page.getByRole("button", {
+                name: "Movies",
+                exact: true
+            })
+        })
+        .first();
+}
+
+
+function getMovieSearchBox(page) {
+
+    return getSearchDialog(page)
+        .getByRole("textbox")
+        .first();
+}
+
+// ============================================================
 // OPEN SEARCH
-// ======================================================
+// ============================================================
 
 async function openSearch(page) {
 
@@ -231,81 +279,65 @@ async function openSearch(page) {
         "Opening Search..."
     );
 
-    /*
-     * District header search link.
-     */
-    const searchLink = page.getByRole("link", {
-        name: /Search for events, movies and restaurants/i
-    }).first();
+    try {
 
-    if (
-        await searchLink.count() > 0 &&
-        await searchLink.isVisible().catch(() => false)
-    ) {
+        // This is the locator discovered using Playwright.
+        const searchButton = page
+            .getByRole("link")
+            .filter({
+                hasText: /^$/
+            })
+            .nth(1);
 
-        await safeClick(
-            searchLink,
-            "Search link"
+        await searchButton.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
+
+        logger.info(
+            "Search icon is visible."
         );
 
-        await page.waitForTimeout(1500);
+        await safeClick(
+            searchButton,
+            "Search icon"
+        );
+
+        const searchDialog =
+            getSearchDialog(page);
+
+        await searchDialog.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
+
+        const searchBox =
+            getMovieSearchBox(page);
+
+        await searchBox.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
         logger.success(
             "Search opened."
         );
 
         return true;
+
+    } catch (error) {
+
+        logger.warning(
+            `Search could not be opened: ${error.message}`
+        );
+
+        return false;
     }
-
-    /*
-     * Some versions of the page may already expose
-     * a search input.
-     */
-    const searchInput = page.locator(
-        'input[type="search"], input[type="text"]'
-    );
-
-    const count = await searchInput.count();
-
-    for (let i = 0; i < count; i++) {
-
-        const input = searchInput.nth(i);
-
-        if (
-            await input.isVisible().catch(() => false)
-        ) {
-
-            const placeholder =
-                await input.getAttribute("placeholder");
-
-            if (
-                placeholder &&
-                /search city|area or locality/i.test(
-                    placeholder
-                )
-            ) {
-                continue;
-            }
-
-            logger.success(
-                "Search input already available."
-            );
-
-            return true;
-        }
-    }
-
-    logger.warning(
-        "Search link/input not found."
-    );
-
-    return false;
 }
 
-
-// ======================================================
+// ============================================================
 // SEARCH MOVIE
-// ======================================================
+// ============================================================
 
 async function searchMovie(page, movieName) {
 
@@ -313,117 +345,80 @@ async function searchMovie(page, movieName) {
         `Searching Movie: ${movieName}`
     );
 
-    /*
-     * First check if movie is already visible.
-     */
-    const movieRegex = new RegExp(
-        escapeRegExp(movieName),
-        "i"
-    );
+    try {
 
-    const existingMovie = page.getByRole("link", {
-        name: movieRegex
-    });
+        const searchBox =
+            getMovieSearchBox(page);
 
-    if (
-        await existingMovie.count() > 0
-    ) {
+        await searchBox.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-        for (let i = 0; i < await existingMovie.count(); i++) {
-
-            if (
-                await existingMovie
-                    .nth(i)
-                    .isVisible()
-                    .catch(() => false)
-            ) {
-
-                logger.success(
-                    `Movie "${movieName}" already visible.`
-                );
-
-                return true;
-            }
-        }
-    }
-
-    /*
-     * Movie isn't on current page.
-     * Open search.
-     */
-    logger.info(
-        "Movie not visible. Opening search..."
-    );
-
-    const opened = await openSearch(page);
-
-    if (!opened) {
-
-        logger.error(
-            "❌ Could not open District search."
+        logger.info(
+            "Movie search box is visible."
         );
 
-        return false;
-    }
+        // Clear the existing value.
+        await searchBox.press(
+            "Control+A"
+        );
 
-    await page.waitForTimeout(1000);
+        await searchBox.press(
+            "Backspace"
+        );
 
-    /*
-     * Find visible text/search input.
-     */
-    const inputs = page.locator(
-        'input[type="search"], input[type="text"]'
-    );
+        // Type like a real user.
+        // This helps trigger the site's search events.
+        await searchBox.pressSequentially(
+            movieName,
+            {
+                delay: 40
+            }
+        );
 
-    const count = await inputs.count();
+        // Verify the actual textbox value.
+        const value =
+            await searchBox.inputValue();
 
-    for (let i = 0; i < count; i++) {
-
-        const input = inputs.nth(i);
+        logger.info(
+            `Search box value: "${value}"`
+        );
 
         if (
-            !(await input.isVisible().catch(() => false))
+            value.trim().toLowerCase() !==
+            movieName.trim().toLowerCase()
         ) {
-            continue;
+
+            throw new Error(
+                `Movie text was not entered correctly. ` +
+                `Expected "${movieName}", got "${value}".`
+            );
         }
-
-        const placeholder =
-            await input.getAttribute("placeholder");
-
-        /*
-         * Never use location input.
-         */
-        if (
-            placeholder &&
-            /search city|area or locality/i.test(
-                placeholder
-            )
-        ) {
-            continue;
-        }
-
-        await input.fill(movieName);
 
         logger.success(
             `Movie search entered: ${movieName}`
         );
 
-        await page.waitForTimeout(1500);
+        // Give the site's search request time to update
+        // the result list after the keyboard events.
+        await page.waitForTimeout(1200);
 
         return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Could not search for movie "${movieName}": ${error.message}`
+        );
+
+        return false;
     }
-
-    logger.error(
-        "❌ Movie search input not found."
-    );
-
-    return false;
 }
 
-
-// ======================================================
+// ============================================================
 // SELECT MOVIE
-// ======================================================
+// ============================================================
 
 async function selectMovie(page, movieName) {
 
@@ -431,68 +426,55 @@ async function selectMovie(page, movieName) {
         `Selecting movie: ${movieName}`
     );
 
-    const movieRegex = new RegExp(
-        escapeRegExp(movieName),
-        "i"
-    );
+    try {
 
-    const movieLinks = page.getByRole("link", {
-        name: movieRegex
-    });
+        const searchDialog =
+            getSearchDialog(page);
 
-    const count = await movieLinks.count();
+        await searchDialog.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    logger.info(
-        `Matching movie links: ${count}`
-    );
+        // Movie result is visible as text inside the search dialog.
+        const movieResult =
+            searchDialog.getByText(
+                movieName,
+                {
+                    exact: true
+                }
+            ).first();
 
-    if (count === 0) {
-
-        logger.error(
-            `Movie "${movieName}" not found.`
-        );
-
-        return false;
-    }
-
-    for (let i = 0; i < count; i++) {
-
-        const movie = movieLinks.nth(i);
-
-        if (
-            !(await movie.isVisible().catch(() => false))
-        ) {
-            continue;
-        }
-
-        const text =
-            (await movie.innerText().catch(() => ""))
-                .replace(/\n/g, " | ")
-                .trim();
+        await movieResult.waitFor({
+            state: "visible",
+            timeout: 15000
+        });
 
         logger.info(
-            `Selecting movie result: ${text}`
+            `Movie result "${movieName}" is visible.`
         );
 
-        await safeClick(
-            movie,
-            `Movie "${movieName}"`
-        );
+        await movieResult.click();
 
         logger.success(
             `Movie "${movieName}" selected successfully.`
         );
 
         return true;
-    }
 
-    return false;
+    } catch (error) {
+
+        logger.error(
+            `Could not select movie "${movieName}": ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
+// ============================================================
 // BOOK TICKETS
-// ======================================================
+// ============================================================
 
 async function clickBookTickets(page) {
 
@@ -500,36 +482,42 @@ async function clickBookTickets(page) {
         "Clicking Book Tickets..."
     );
 
-    const button = page.getByRole("button", {
-        name: /Book Tickets/i
-    }).first();
+    try {
 
-    await button.waitFor({
-        state: "visible",
-        timeout: 15000
-    });
+        const button =
+            page.getByRole("button", {
+                name: /Book Tickets/i
+            }).first();
 
-    await safeClick(
-        button,
-        "Book Tickets"
-    );
+        await button.waitFor({
+            state: "visible",
+            timeout: 15000
+        });
 
-    await page.waitForTimeout(1500);
+        await safeClick(
+            button,
+            "Book Tickets"
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Book Tickets failed: ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
+// ============================================================
 // LANGUAGE
-// ======================================================
+// ============================================================
 
 async function selectLanguage(page, language) {
 
     if (!language) {
-
-        logger.info(
-            "Language selection not required."
-        );
-
         return true;
     }
 
@@ -537,50 +525,51 @@ async function selectLanguage(page, language) {
         `Selecting language: ${language}`
     );
 
-    const languageOption = page.locator(
-        `label[for="${language}_lsd"]`
-    );
+    try {
 
-    if (
-        await languageOption.count() === 0
-    ) {
+        const option =
+            page.locator(
+                `label[for="${language}_lsd"]`
+            );
 
-        logger.info(
-            "Language selection not required."
+        if (await option.count() === 0) {
+
+            logger.info(
+                "Language selection not required."
+            );
+
+            return true;
+        }
+
+        await option.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
+
+        await safeClick(
+            option,
+            `${language} language`
+        );
+
+        logger.success(
+            `${language} selected successfully.`
         );
 
         return true;
-    }
 
-    if (
-        !(await languageOption
-            .isVisible()
-            .catch(() => false))
-    ) {
+    } catch (error) {
 
         logger.error(
-            `Language "${language}" is not available.`
+            `Language selection failed: ${error.message}`
         );
 
         return false;
     }
-
-    await safeClick(
-        languageOption,
-        `${language} language`
-    );
-
-    logger.success(
-        `${language} selected successfully.`
-    );
-
-    return true;
 }
 
-
-// ======================================================
+// ============================================================
 // PROCEED
-// ======================================================
+// ============================================================
 
 async function clickProceed(page) {
 
@@ -588,25 +577,38 @@ async function clickProceed(page) {
         "Clicking Proceed..."
     );
 
-    const button = page.getByRole("button", {
-        name: /^Proceed$/i
-    }).first();
+    try {
 
-    await button.waitFor({
-        state: "visible",
-        timeout: 15000
-    });
+        const button =
+            page.getByRole("button", {
+                name: /^Proceed$/i
+            }).first();
 
-    await safeClick(
-        button,
-        "Proceed"
-    );
+        await button.waitFor({
+            state: "visible",
+            timeout: 15000
+        });
+
+        await safeClick(
+            button,
+            "Proceed"
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Proceed failed: ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
+// ============================================================
 // DATE
-// ======================================================
+// ============================================================
 
 async function selectDate(page, date) {
 
@@ -614,28 +616,39 @@ async function selectDate(page, date) {
         `Selecting date: ${date}`
     );
 
-    const dateButton = page.getByRole("button", {
-        name: date,
-        exact: true
-    }).first();
+    try {
 
-    await dateButton.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
+        const button =
+            page.getByRole("button", {
+                name: date,
+                exact: true
+            }).first();
 
-    await safeClick(
-        dateButton,
-        `Date "${date}"`
-    );
+        await button.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    return true;
+        await safeClick(
+            button,
+            `Date "${date}"`
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Date selection failed: ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
-// SHOW TIME
-// ======================================================
+// ============================================================
+// SHOW
+// ============================================================
 
 async function selectShow(page, showTime) {
 
@@ -643,30 +656,42 @@ async function selectShow(page, showTime) {
         `Selecting show time: ${showTime}`
     );
 
-    const showButton = page.getByRole("button", {
-        name: showTime,
-        exact: true
-    }).first();
+    try {
 
-    await showButton.waitFor({
-        state: "visible",
-        timeout: 10000
-    });
+        const button =
+            page.getByRole("button", {
+                name: showTime,
+                exact: true
+            }).first();
 
-    await safeClick(
-        showButton,
-        `Show time "${showTime}"`
-    );
+        await button.waitFor({
+            state: "visible",
+            timeout: 10000
+        });
 
-    return true;
+        await safeClick(
+            button,
+            `Show "${showTime}"`
+        );
+
+        return true;
+
+    } catch (error) {
+
+        logger.error(
+            `Show selection failed: ${error.message}`
+        );
+
+        return false;
+    }
 }
 
-
-// ======================================================
-// EXPORT
-// ======================================================
+// ============================================================
+// EXPORTS
+// ============================================================
 
 module.exports = {
+
     openLocationPopup,
     searchCity,
     selectCity,
@@ -678,4 +703,5 @@ module.exports = {
     clickProceed,
     selectDate,
     selectShow
+    
 };
